@@ -554,3 +554,53 @@
     (ok true)
   )
 )
+
+(define-private (get-available-liquidity (asset-contract principal))
+  (let 
+    (
+      (market (unwrap-panic (map-get? market-data { asset-contract: asset-contract })))
+    )
+    (- (get total-supplied market) (get total-borrowed market))
+  )
+)
+
+(define-private (get-user-voting-power (user principal))
+  ;; Simplified: based on supplied assets + governance token balance
+  u100000 ;; Placeholder implementation
+)
+
+(define-read-only (get-flash-loan-fee)
+  (var-get flash-loan-fee)
+)
+
+(define-read-only (get-user-pending-rewards (user principal))
+  (let 
+    (
+      (user-data (map-get? user-rewards { user: user }))
+    )
+    (match user-data
+      data (get pending-rewards data)
+      u0
+    )
+  )
+)
+
+(define-read-only (get-liquidation-protection-status (user principal))
+  (map-get? liquidation-protection { user: user })
+)
+
+(define-read-only (get-cross-chain-operation-status (operation-id uint))
+  (map-get? cross-chain-operations { operation-id: operation-id })
+)
+
+(define-read-only (get-automated-order (order-id uint))
+  (map-get? automated-orders { order-id: order-id })
+)
+
+(define-read-only (get-daily-stats (date uint))
+  (map-get? daily-protocol-stats { date: date })
+)
+
+(define-read-only (get-user-activity-stats (user principal))
+  (map-get? user-activity-stats { user: user })
+)
