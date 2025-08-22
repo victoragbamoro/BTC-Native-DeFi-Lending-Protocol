@@ -290,3 +290,317 @@
     (ok true)
   )
 )
+
+(define-constant ERR_REWARD_CALCULATION_FAILED (err u210))
+(define-constant ERR_INSUFFICIENT_REWARDS (err u211))
+
+;; Reward token (could be a governance token)
+(define-data-var reward-token principal 'SP000000000000000000002Q6VF78.reward-token)
+(define-data-var total-reward-pool uint u1000000000000) ;; 1M reward tokens
+(define-data-var reward-per-block uint u100) ;; Rewards distributed per block
+
+;; User reward tracking
+(define-map user-rewards
+  { user: principal }
+  {
+    pending-rewards: uint,
+    last-claim-block: uint,
+    total-claimed: uint
+  }
+)
+
+;; Market reward multipliers
+(define-map market-reward-multipliers
+  { asset-contract: principal }
+  { supply-multiplier: uint, borrow-multiplier: uint }
+)
+
+(define-public (set-reward-multipliers 
+    (asset-contract principal) 
+    (supply-multiplier uint) 
+    (borrow-multiplier uint)
+  )
+  (begin
+    (try! (check-owner))
+    (map-set market-reward-multipliers
+      { asset-contract: asset-contract }
+      { supply-multiplier: supply-multiplier, borrow-multiplier: borrow-multiplier }
+    )
+    (ok true)
+  )
+)
+
+(define-public (claim-rewards)
+  (let 
+    (
+      (user-reward-data (default-to 
+        { pending-rewards: u0, last-claim-block: u0, total-claimed: u0 }
+        (map-get? user-rewards { user: tx-sender })
+      ))
+      (pending-amount (get pending-rewards user-reward-data))
+    )
+    
+    (asserts! (> pending-amount u0) ERR_INSUFFICIENT_REWARDS)
+    
+    ;; Update user rewards
+    (map-set user-rewards
+      { user: tx-sender }
+      {
+        pending-rewards: u0,
+        last-claim-block: stacks-block-height,
+        total-claimed: (+ (get total-claimed user-reward-data) pending-amount)
+      }
+    )
+    
+    ;; Transfer rewards (simplified)
+    (ok pending-amount)
+  )
+)
+
+(define-constant ERR_PROPOSAL_NOT_FOUND (err u220))
+(define-constant ERR_VOTING_PERIOD_ENDED (err u221))
+(define-constant ERR_ALREADY_VOTED (err u222))
+(define-constant ERR_INSUFFICIENT_VOTING_POWER (err u223))
+
+(define-data-var min-proposal-threshold uint u100000) ;; Min tokens needed to create proposal
+(define-data-var voting-period uint u1008) ;; ~1 week in blocks
+(define-data-var quorum-threshold uint u400) ;; 40% quorum required
+
+;; Proposal tracking
+(define-map proposals
+  { proposal-id: uint }
+  {
+    proposer: principal,
+    title: (string-ascii 100),
+    description: (string-ascii 500),
+    for-votes: uint,
+    against-votes: uint,
+    start-block: uint,
+    end-block: uint,
+    executed: bool,
+    action-type: (string-ascii 50) ;; "parameter-change", "asset-addition", etc.
+  }
+)
+
+(define-constant ERR_PROTECTION_ALREADY_ACTIVE (err u240))
+(define-constant ERR_PROTECTION_NOT_FOUND (err u241))
+
+(define-map liquidation-protection
+  { user: principal }
+  {
+    protection-fee-paid: uint,
+    protection-expires: uint,
+    max-protection-amount: uint
+  }
+)
+
+(define-data-var protection-fee-rate uint u50) ;; 0.5% fee for protection
+
+(define-public (purchase-liquidation-protection (protection-amount uint) (duration-blocks uint))
+  (let 
+    (
+      (fee (/ (* protection-amount (var-get protection-fee-rate)) u10000))
+      (expiry-block (+ stacks-block-height duration-blocks))
+    )
+    
+    (asserts! (is-none (map-get? liquidation-protection { user: tx-sender })) ERR_PROTECTION_ALREADY_ACTIVE)
+    
+    (map-set liquidation-protection
+      { user: tx-sender }
+      {
+        protection-fee-paid: fee,
+        protection-expires: expiry-block,
+        max-protection-amount: protection-amount
+      }
+    )
+    
+    (ok true)
+  )
+)
+
+(define-constant ERR_BRIDGE_OPERATION_FAILED (err u250))
+(define-constant ERR_INVALID_CHAIN_ID (err u251))
+
+(define-map cross-chain-operations
+  { operation-id: uint }
+  {
+    user: principal,
+    source-chain: uint,
+    dest-chain: uint,
+    asset: principal,
+    amount: uint,
+    status: (string-ascii 20)
+  }
+)
+
+(define-data-var next-operation-id uint u1)
+
+(define-public (initiate-cross-chain-transfer 
+    (dest-chain uint) 
+    (asset-contract principal) 
+    (amount uint)
+  )
+  (let 
+    (
+      (operation-id (var-get next-operation-id))
+    )
+    
+    (try! (check-protocol-active))
+    
+    (map-set cross-chain-operations
+      { operation-id: operation-id }
+      {
+        user: tx-sender,
+        source-chain: u1, ;; Stacks chain ID
+        dest-chain: dest-chain,
+        asset: asset-contract,
+        amount: amount,
+        status: "initiated"
+      }
+    )
+    
+    (var-set next-operation-id (+ operation-id u1))
+    (ok operation-id)
+  )
+)
+
+(define-constant ERR_INVALID_TRIGGER_PRICE (err u260))
+(define-constant ERR_ORDER_NOT_FOUND (err u261))
+
+(define-map automated-orders
+  { order-id: uint }
+  {
+    user: principal,
+    order-type: (string-ascii 20), ;; "stop-loss", "take-profit", "auto-repay"
+    asset: principal,
+    trigger-price: uint,
+    amount: uint,
+    active: bool
+  }
+)
+
+(define-data-var next-order-id uint u1)
+
+(define-public (create-stop-loss-order 
+    (asset-contract principal) 
+    (trigger-price uint) 
+    (amount uint)
+  )
+  (let 
+    (
+      (order-id (var-get next-order-id))
+    )
+    
+    (asserts! (> trigger-price u0) ERR_INVALID_TRIGGER_PRICE)
+    
+    (map-set automated-orders
+      { order-id: order-id }
+      {
+        user: tx-sender,
+        order-type: "stop-loss",
+        asset: asset-contract,
+        trigger-price: trigger-price,
+        amount: amount,
+        active: true
+      }
+    )
+    
+    (var-set next-order-id (+ order-id u1))
+    (ok order-id)
+  )
+)
+(define-map daily-protocol-stats
+  { date: uint }
+  {
+    total-value-locked: uint,
+    total-borrowed: uint,
+    daily-volume: uint,
+    active-users: uint,
+    liquidations-count: uint
+  }
+)
+
+(define-map user-activity-stats
+  { user: principal }
+  {
+    total-supplied: uint,
+    total-borrowed: uint,
+    liquidations-experienced: uint,
+    last-activity-block: uint,
+    rewards-earned: uint
+  }
+)
+
+(define-public (update-daily-stats 
+    (date uint) 
+    (tvl uint) 
+    (total-borrowed uint) 
+    (volume uint) 
+    (users uint) 
+    (liquidations uint)
+  )
+  (begin
+    (try! (check-owner))
+    (map-set daily-protocol-stats
+      { date: date }
+      {
+        total-value-locked: tvl,
+        total-borrowed: total-borrowed,
+        daily-volume: volume,
+        active-users: users,
+        liquidations-count: liquidations
+      }
+    )
+    (ok true)
+  )
+)
+
+(define-private (get-available-liquidity (asset-contract principal))
+  (let 
+    (
+      (market (unwrap-panic (map-get? market-data { asset-contract: asset-contract })))
+    )
+    (- (get total-supplied market) (get total-borrowed market))
+  )
+)
+
+(define-private (get-user-voting-power (user principal))
+  ;; Simplified: based on supplied assets + governance token balance
+  u100000 ;; Placeholder implementation
+)
+
+(define-read-only (get-flash-loan-fee)
+  (var-get flash-loan-fee)
+)
+
+(define-read-only (get-user-pending-rewards (user principal))
+  (let 
+    (
+      (user-data (map-get? user-rewards { user: user }))
+    )
+    (match user-data
+      data (get pending-rewards data)
+      u0
+    )
+  )
+)
+
+(define-read-only (get-liquidation-protection-status (user principal))
+  (map-get? liquidation-protection { user: user })
+)
+
+(define-read-only (get-cross-chain-operation-status (operation-id uint))
+  (map-get? cross-chain-operations { operation-id: operation-id })
+)
+
+(define-read-only (get-automated-order (order-id uint))
+  (map-get? automated-orders { order-id: order-id })
+)
+
+(define-read-only (get-daily-stats (date uint))
+  (map-get? daily-protocol-stats { date: date })
+)
+
+(define-read-only (get-user-activity-stats (user principal))
+  (map-get? user-activity-stats { user: user })
+)
