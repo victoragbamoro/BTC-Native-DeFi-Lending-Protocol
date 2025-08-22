@@ -154,3 +154,76 @@
     (ok true)
   )
 )
+
+;; Update protocol parameters
+(define-public (update-protocol-parameters
+    (new-liquidation-threshold (optional uint))
+    (new-liquidation-incentive (optional uint))
+    (new-protocol-fee (optional uint))
+  )
+  (begin
+    (try! (check-owner))
+    
+    ;; Update each parameter if provided
+    (if (is-some new-liquidation-threshold)
+      (var-set liquidation-threshold (unwrap-panic new-liquidation-threshold))
+      true
+    )
+    
+    (if (is-some new-liquidation-incentive)
+      (var-set liquidation-incentive (unwrap-panic new-liquidation-incentive))
+      true
+    )
+    
+    (if (is-some new-protocol-fee)
+      (var-set protocol-fee (unwrap-panic new-protocol-fee))
+      true
+    )
+    
+    (ok true)
+  )
+)
+
+;; Update interest rate model parameters
+(define-public (update-interest-rate-model
+    (new-base-rate (optional uint))
+    (new-rate-multiplier (optional uint))
+    (new-optimal-utilization (optional uint))
+    (new-reserve-factor (optional uint))
+  )
+  (begin
+    (try! (check-owner))
+    
+    ;; Update each parameter if provided
+    (if (is-some new-base-rate)
+      (var-set base-rate (unwrap-panic new-base-rate))
+      true
+    )
+    
+    (if (is-some new-rate-multiplier)
+      (var-set rate-multiplier (unwrap-panic new-rate-multiplier))
+      true
+    )
+    
+    (if (is-some new-optimal-utilization)
+      (var-set optimal-utilization (unwrap-panic new-optimal-utilization))
+      true
+    )
+    
+    (if (is-some new-reserve-factor)
+      (var-set reserve-factor (unwrap-panic new-reserve-factor))
+      true
+    )
+    
+    (ok true)
+  )
+)
+
+;; Emergency pause for all protocol operations
+(define-public (set-protocol-pause (paused bool))
+  (begin
+    (try! (check-owner))
+    (var-set protocol-paused paused)
+    (ok true)
+  )
+)
