@@ -463,3 +463,94 @@
     (ok operation-id)
   )
 )
+
+(define-constant ERR_INVALID_TRIGGER_PRICE (err u260))
+(define-constant ERR_ORDER_NOT_FOUND (err u261))
+
+(define-map automated-orders
+  { order-id: uint }
+  {
+    user: principal,
+    order-type: (string-ascii 20), ;; "stop-loss", "take-profit", "auto-repay"
+    asset: principal,
+    trigger-price: uint,
+    amount: uint,
+    active: bool
+  }
+)
+
+(define-data-var next-order-id uint u1)
+
+(define-public (create-stop-loss-order 
+    (asset-contract principal) 
+    (trigger-price uint) 
+    (amount uint)
+  )
+  (let 
+    (
+      (order-id (var-get next-order-id))
+    )
+    
+    (asserts! (> trigger-price u0) ERR_INVALID_TRIGGER_PRICE)
+    
+    (map-set automated-orders
+      { order-id: order-id }
+      {
+        user: tx-sender,
+        order-type: "stop-loss",
+        asset: asset-contract,
+        trigger-price: trigger-price,
+        amount: amount,
+        active: true
+      }
+    )
+    
+    (var-set next-order-id (+ order-id u1))
+    (ok order-id)
+  )
+)
+(define-map daily-protocol-stats
+  { date: uint }
+  {
+    total-value-locked: uint,
+    total-borrowed: uint,
+    daily-volume: uint,
+    active-users: uint,
+    liquidations-count: uint
+  }
+)
+
+(define-map user-activity-stats
+  { user: principal }
+  {
+    total-supplied: uint,
+    total-borrowed: uint,
+    liquidations-experienced: uint,
+    last-activity-block: uint,
+    rewards-earned: uint
+  }
+)
+
+(define-public (update-daily-stats 
+    (date uint) 
+    (tvl uint) 
+    (total-borrowed uint) 
+    (volume uint) 
+    (users uint) 
+    (liquidations uint)
+  )
+  (begin
+    (try! (check-owner))
+    (map-set daily-protocol-stats
+      { date: date }
+      {
+        total-value-locked: tvl,
+        total-borrowed: total-borrowed,
+        daily-volume: volume,
+        active-users: users,
+        liquidations-count: liquidations
+      }
+    )
+    (ok true)
+  )
+)
