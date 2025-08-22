@@ -290,3 +290,106 @@
     (ok true)
   )
 )
+
+(define-constant ERR_REWARD_CALCULATION_FAILED (err u210))
+(define-constant ERR_INSUFFICIENT_REWARDS (err u211))
+
+;; Reward token (could be a governance token)
+(define-data-var reward-token principal 'SP000000000000000000002Q6VF78.reward-token)
+(define-data-var total-reward-pool uint u1000000000000) ;; 1M reward tokens
+(define-data-var reward-per-block uint u100) ;; Rewards distributed per block
+
+;; User reward tracking
+(define-map user-rewards
+  { user: principal }
+  {
+    pending-rewards: uint,
+    last-claim-block: uint,
+    total-claimed: uint
+  }
+)
+
+;; Market reward multipliers
+(define-map market-reward-multipliers
+  { asset-contract: principal }
+  { supply-multiplier: uint, borrow-multiplier: uint }
+)
+
+(define-public (set-reward-multipliers 
+    (asset-contract principal) 
+    (supply-multiplier uint) 
+    (borrow-multiplier uint)
+  )
+  (begin
+    (try! (check-owner))
+    (map-set market-reward-multipliers
+      { asset-contract: asset-contract }
+      { supply-multiplier: supply-multiplier, borrow-multiplier: borrow-multiplier }
+    )
+    (ok true)
+  )
+)
+
+(define-public (claim-rewards)
+  (let 
+    (
+      (user-reward-data (default-to 
+        { pending-rewards: u0, last-claim-block: u0, total-claimed: u0 }
+        (map-get? user-rewards { user: tx-sender })
+      ))
+      (pending-amount (get pending-rewards user-reward-data))
+    )
+    
+    (asserts! (> pending-amount u0) ERR_INSUFFICIENT_REWARDS)
+    
+    ;; Update user rewards
+    (map-set user-rewards
+      { user: tx-sender }
+      {
+        pending-rewards: u0,
+        last-claim-block: stacks-block-height,
+        total-claimed: (+ (get total-claimed user-reward-data) pending-amount)
+      }
+    )
+    
+    ;; Transfer rewards (simplified)
+    (ok pending-amount)
+  )
+)
+
+(define-constant ERR_PROPOSAL_NOT_FOUND (err u220))
+(define-constant ERR_VOTING_PERIOD_ENDED (err u221))
+(define-constant ERR_ALREADY_VOTED (err u222))
+(define-constant ERR_INSUFFICIENT_VOTING_POWER (err u223))
+
+(define-data-var min-proposal-threshold uint u100000) ;; Min tokens needed to create proposal
+(define-data-var voting-period uint u1008) ;; ~1 week in blocks
+(define-data-var quorum-threshold uint u400) ;; 40% quorum required
+
+;; Proposal tracking
+(define-map proposals
+  { proposal-id: uint }
+  {
+    proposer: principal,
+    title: (string-ascii 100),
+    description: (string-ascii 500),
+    for-votes: uint,
+    against-votes: uint,
+    start-block: uint,
+    end-block: uint,
+    executed: bool,
+    action-type: (string-ascii 50) ;; "parameter-change", "asset-addition", etc.
+  }
+)
+
+(define-constant ERR_PROTECTION_ALREADY_ACTIVE (err u240))
+(define-constant ERR_PROTECTION_NOT_FOUND (err u241))
+
+(define-map liquidation-protection
+  { user: principal }
+  {
+    protection-fee-paid: uint,
+    protection-expires: uint,
+    max-protection-amount: uint
+  }
+)
